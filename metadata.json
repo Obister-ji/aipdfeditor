@@ -1,0 +1,5 @@
+{
+  "name": "AI PDF Editor Pro",
+  "description": "An advanced PDF editor that allows you to view, annotate, and modify PDF documents directly in your browser. Features include adding text, images, shapes, and freehand drawing. Leverage the power of AI to summarize your documents with a single click.",
+  "requestFramePermissions": []
+}
