@@ -19,3 +19,13 @@ View your app in AI Studio: https://ai.studio/apps/drive/10GbcRhhipY0Rv08mETeeQe
 3. Run the app:
    `npm run dev`
  hii obi
+
+   ## Screenshots
+
+   Preview images are available in the project's `public/` folder and are served from the app root when running locally. Below are the screenshots included with this repo:
+
+   - Desktop view
+      ![Desktop view](/AI%20PDF%20Editor%20Pro%20-%20Google%20Chrome%2024-10-2025%2010_35_44.png)
+
+   - Editor in action
+      ![Editor in action](/AI%20PDF%20Editor%20Pro%20-%20Google%20Chrome%2024-10-2025%2010_36_56.png)
