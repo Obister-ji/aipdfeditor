@@ -25,7 +25,9 @@ View your app in AI Studio: https://ai.studio/apps/drive/10GbcRhhipY0Rv08mETeeQe
    Preview images are available in the project's `public/` folder and are served from the app root when running locally. Below are the screenshots included with this repo:
 
    - Desktop view
-      ![Desktop view](/AI%20PDF%20Editor%20Pro%20-%20Google%20Chrome%2024-10-2025%2010_35_44.png)
+      <img width="1200" height="475" alt="GHBanner" src="/public/AI PDF Editor Pro - Google Chrome 24-10-2025 10_35_44.png" />
+</div>
 
    - Editor in action
-      ![Editor in action](/AI%20PDF%20Editor%20Pro%20-%20Google%20Chrome%2024-10-2025%2010_36_56.png)
+      <img width="1200" height="475" alt="GHBanner" src="/public/AI PDF Editor Pro - Google Chrome 24-10-2025 10_36_56.png">
+</div>
