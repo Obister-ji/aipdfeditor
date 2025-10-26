@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import type { EditorObject, Tool, TextObject, OriginalTextObject } from '../types';
+import type { EditorObject, Tool, TextObject, OriginalTextObject, ImageObject } from '../types';
 import TextToolbar from './TextToolbar';
+import ImageToolbar from './ImageToolbar';
+import ImageLayerDialog from './ImageLayerDialog';
 
 interface PdfViewerProps {
   page: any;
@@ -10,6 +12,8 @@ interface PdfViewerProps {
   tool: Tool;
   onAddObject: (obj: EditorObject) => void;
   onUpdateObject: (objectId: string, updates: Partial<EditorObject>) => void;
+  onBringToFront: (objectId: string) => void;
+  onSendToBack: (objectId: string) => void;
   onUpdateOriginalText: (objectId: string, updates: Partial<OriginalTextObject>) => void;
   onDeleteObject: (objectId: string) => void;
   onResetOriginalTextPosition: (objectId: string) => void;
@@ -20,23 +24,31 @@ interface PdfViewerProps {
 type EditableObject = TextObject | OriginalTextObject;
 
 const PdfViewer: React.FC<PdfViewerProps> = (props) => {
-  const { page, zoom, objects, originalText, tool, onAddObject, onUpdateObject, onUpdateOriginalText, onDeleteObject, onResetOriginalTextPosition, selectedObjectId, onSelectObject } = props;
+  const { page, zoom, objects, originalText, tool, onAddObject, onUpdateObject, onUpdateOriginalText, onDeleteObject, onResetOriginalTextPosition, onBringToFront, onSendToBack, selectedObjectId, onSelectObject } = props;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const interactionRef = useRef<HTMLDivElement>(null);
   const [drawingState, setDrawingState] = useState<{ isDrawing: boolean; points: {x: number; y: number}[] }>({ isDrawing: false, points: [] });
-  const [draggedObject, setDraggedObject] = useState<{ 
-    id: string; 
-    initialX: number; 
-    initialY: number; 
-    mouseStartX: number; 
+  const [rectangleDrawing, setRectangleDrawing] = useState<{ isDrawing: boolean; startX: number; startY: number; currentX: number; currentY: number }>({ isDrawing: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
+  const [draggedObject, setDraggedObject] = useState<{
+    id: string;
+    initialX: number;
+    initialY: number;
+    mouseStartX: number;
     mouseStartY: number;
     type: 'editor' | 'original';
     originalTransform?: number[]; // Store original transform for original text
   } | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [showLayerDialog, setShowLayerDialog] = useState(false);
+  const [pendingImageUpload, setPendingImageUpload] = useState<{
+    coords: { x: number; y: number };
+    file: File;
+  } | null>(null);
 
-  const allObjects = [...objects, ...originalText];
+  // Sort all objects by z-index for proper layering
+  const sortedObjects = [...objects].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+  const allObjects = [...sortedObjects, ...originalText];
   const selectedObject = allObjects.find(o => o.id === selectedObjectId) as EditableObject | undefined;
 
   const renderPage = useCallback(() => {
@@ -107,6 +119,9 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
     } else if (tool === 'draw') {
       onSelectObject(null);
       setDrawingState({ isDrawing: true, points: [coords] });
+    } else if (tool === 'shape') {
+      onSelectObject(null);
+      setRectangleDrawing({ isDrawing: true, startX: coords.x, startY: coords.y, currentX: coords.x, currentY: coords.y });
     } else {
         onSelectObject(null);
     }
@@ -128,6 +143,15 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
       const coords = getCoords(e);
       if (coords) {
         setDrawingState((prev) => ({ ...prev, points: [...prev.points, coords] }));
+      }
+    } else if (tool === 'shape' && rectangleDrawing.isDrawing) {
+      const coords = getCoords(e);
+      if (coords) {
+        setRectangleDrawing(prev => ({
+          ...prev,
+          currentX: coords.x,
+          currentY: coords.y
+        }));
       }
     }
   };
@@ -174,6 +198,24 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
         });
       }
       setDrawingState({ isDrawing: false, points: [] });
+    } else if (tool === 'shape' && rectangleDrawing.isDrawing) {
+      const width = Math.abs(rectangleDrawing.currentX - rectangleDrawing.startX) / zoom;
+      const height = Math.abs(rectangleDrawing.currentY - rectangleDrawing.startY) / zoom;
+      const x = Math.min(rectangleDrawing.startX, rectangleDrawing.currentX) / zoom;
+      const y = Math.min(rectangleDrawing.startY, rectangleDrawing.currentY) / zoom;
+      
+      if (width > 5 && height > 5) { // Only create rectangle if it has meaningful size
+        onAddObject({
+          id: crypto.randomUUID(),
+          type: 'shape',
+          shape: 'rectangle',
+          x,
+          y,
+          width,
+          height,
+        });
+      }
+      setRectangleDrawing({ isDrawing: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
     }
   };
 
@@ -192,7 +234,7 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
         onSelectObject(newId);
         setEditingTextId(newId);
     } else if (tool === 'shape') {
-      onAddObject({ id: crypto.randomUUID(), type: 'shape', shape: 'rectangle', x: scaledCoords.x, y: scaledCoords.y, width: 100, height: 50 });
+      onAddObject({ id: crypto.randomUUID(), type: 'shape', shape: 'rectangle', x: scaledCoords.x, y: scaledCoords.y, width: 0, height: 0 });
     } else if (tool === 'image') {
         const input = document.createElement('input');
         input.type = 'file';
@@ -200,14 +242,8 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
         input.onchange = (e) => {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (file) {
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const src = event.target?.result as string;
-                    const img = new Image();
-                    img.onload = () => { onAddObject({ id: crypto.randomUUID(), type: 'image', src, x: scaledCoords.x, y: scaledCoords.y, width: img.width * 0.2, height: img.height * 0.2 }); }
-                    img.src = src;
-                };
-                reader.readAsDataURL(file);
+                setPendingImageUpload({ coords: scaledCoords, file });
+                setShowLayerDialog(true);
             }
         };
         input.click();
@@ -257,6 +293,18 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
                 zoom={zoom}
                 onUpdate={handleUpdateText}
                 onDelete={onDeleteObject}
+            />
+        )}
+        
+        {selectedObject && objects.find(o => o.id === selectedObject.id)?.type === 'image' && (
+            <ImageToolbar
+                object={objects.find(o => o.id === selectedObject.id) as ImageObject}
+                viewerRef={interactionRef}
+                zoom={zoom}
+                onUpdate={onUpdateObject}
+                onDelete={onDeleteObject}
+                onBringToFront={onBringToFront}
+                onSendToBack={onSendToBack}
             />
         )}
         
@@ -341,7 +389,7 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
             boxSizing: 'border-box',
             transition: draggedObject?.id === obj.id ? 'none' : 'outline 0.2s ease',
             backgroundColor: 'white',
-            zIndex: isDragged ? 10 : 1, // Ensure dragged text appears above others
+            zIndex: isDragged ? 15 : 5, // Ensure text has a consistent base z-index of 5
             boxShadow: isDragged ? '0 2px 8px rgba(0, 0, 0, 0.15)' : 'none', // Add shadow to moved text
           };
 
@@ -406,8 +454,8 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
             return (
               <textarea
                 key={obj.id}
-                className="absolute bg-white text-black p-0 z-20 resize-none overflow-hidden rounded-sm shadow-md"
-                style={{ ...baseStyle, outline: '1px solid #38bdf8', WebkitAppearance: 'none', MozAppearance: 'none' }}
+                className="absolute bg-white text-black p-0 resize-none overflow-hidden rounded-sm shadow-md"
+                style={{ ...baseStyle, zIndex: 5, outline: '1px solid #38bdf8', WebkitAppearance: 'none', MozAppearance: 'none' }}
                 value={obj.text}
                 onChange={(e) => handleUpdateText(obj.id, { text: e.target.value })}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); } }}
@@ -417,14 +465,14 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
             )
           }
           return (
-            <div key={obj.id} data-id={obj.id} className={`select-none ${isSelected ? 'outline outline-2 outline-blue-500 outline-dashed' : ''}`} style={baseStyle}>
+            <div key={obj.id} data-id={obj.id} className={`select-none ${isSelected ? 'outline outline-2 outline-blue-500 outline-dashed' : ''}`} style={{ ...baseStyle, zIndex: 5 }}>
               {obj.text || ''}
             </div>
           );
         })}
 
-        {/* Render other user-added objects */}
-        {objects.filter(o => o.type !== 'text').map(obj => {
+        {/* Render other user-added objects in z-index order */}
+        {sortedObjects.filter(o => o.type !== 'text').map(obj => {
           const isSelected = selectedObjectId === obj.id;
           const selectBorderStyle = isSelected ? '2px dashed blue' : 'none';
           const cursorStyle = tool === 'select' ? 'move' : 'default';
@@ -432,15 +480,63 @@ const PdfViewer: React.FC<PdfViewerProps> = (props) => {
           const commonStyle = { position: 'absolute', left: obj.x * zoom, top: obj.y * zoom, cursor: cursorStyle, boxSizing: 'border-box' } as React.CSSProperties;
 
           switch(obj.type) {
-            case 'image': return <img key={obj.id} data-id={obj.id} src={obj.src} style={{ ...commonStyle, width: obj.width * zoom, height: obj.height * zoom, border: selectBorderStyle }} alt="user upload"/>;
-            case 'shape': return <div key={obj.id} data-id={obj.id} style={{ ...commonStyle, width: obj.width * zoom, height: obj.height * zoom, border: `2px solid black`, outline: isSelected ? '2px dashed blue' : 'none', outlineOffset: '2px' }}></div>;
-            case 'draw': return <svg key={obj.id} className="absolute top-0 left-0 w-full h-full pointer-events-none"><path d={obj.points.map((p,i) => `${i === 0 ? 'M' : 'L'} ${p.x * zoom} ${p.y * zoom}`).join(' ')} stroke="black" strokeWidth="2" fill="none" /></svg>;
+            case 'image': return <img key={obj.id} data-id={obj.id} src={obj.src} style={{ ...commonStyle, width: obj.width * zoom, height: obj.height * zoom, border: selectBorderStyle, zIndex: obj.zIndex }} alt="user upload"/>;
+            case 'shape': return <div key={obj.id} data-id={obj.id} style={{ ...commonStyle, width: obj.width * zoom, height: obj.height * zoom, border: `2px solid black`, outline: isSelected ? '2px dashed blue' : 'none', outlineOffset: '2px', zIndex: obj.zIndex || 10 }}></div>;
+            case 'draw': return <svg key={obj.id} className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: obj.zIndex || 10 }}><path d={obj.points.map((p,i) => `${i === 0 ? 'M' : 'L'} ${p.x * zoom} ${p.y * zoom}`).join(' ')} stroke="black" strokeWidth="2" fill="none" /></svg>;
             default: return null;
           }
         })}
 
-        {drawingState.isDrawing && drawingState.points.length > 1 && ( <svg className="absolute top-0 left-0 w-full h-full pointer-events-none"><path d={drawingState.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} stroke="black" strokeWidth="2" fill="none" /></svg> )}
+        {drawingState.isDrawing && drawingState.points.length > 1 && ( <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 1000 }}><path d={drawingState.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} stroke="black" strokeWidth="2" fill="none" /></svg> )}
+        
+        {rectangleDrawing.isDrawing && (
+          <div
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+            style={{
+              border: '2px dashed blue',
+              borderStyle: 'dashed',
+              left: `${Math.min(rectangleDrawing.startX, rectangleDrawing.currentX)}px`,
+              top: `${Math.min(rectangleDrawing.startY, rectangleDrawing.currentY)}px`,
+              width: `${Math.abs(rectangleDrawing.currentX - rectangleDrawing.startX)}px`,
+              height: `${Math.abs(rectangleDrawing.currentY - rectangleDrawing.startY)}px`,
+              zIndex: 1000,
+            }}
+          />
+        )}
       </div>
+      
+      {showLayerDialog && (
+        <ImageLayerDialog
+          isOpen={showLayerDialog}
+          onSelect={(inFront) => {
+            if (pendingImageUpload) {
+              const reader = new FileReader();
+              reader.onload = (event) => {
+                const src = event.target?.result as string;
+                const img = new Image();
+                img.onload = () => { onAddObject({
+                  id: crypto.randomUUID(),
+                  type: 'image',
+                  src,
+                  x: pendingImageUpload.coords.x,
+                  y: pendingImageUpload.coords.y,
+                  width: img.width * 0.2,
+                  height: img.height * 0.2,
+                  zIndex: inFront ? 15 : 1 // Front: 15 (above text), Behind: 1 (below text)
+                }); }
+                img.src = src;
+              };
+              reader.readAsDataURL(pendingImageUpload.file);
+            }
+            setShowLayerDialog(false);
+            setPendingImageUpload(null);
+          }}
+          onCancel={() => {
+            setShowLayerDialog(false);
+            setPendingImageUpload(null);
+          }}
+        />
+      )}
     </div>
   );
 };

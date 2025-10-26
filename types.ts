@@ -23,6 +23,7 @@ export interface ImageObject extends BaseEditorObject {
   src: string; // base64 data URL
   width: number;
   height: number;
+  zIndex: number; // Controls layering (higher values appear in front)
 }
 
 export interface DrawObject extends BaseEditorObject {

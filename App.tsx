@@ -235,6 +235,53 @@ const App: React.FC = () => {
     updateHistory({ ...currentState, originalText: newOriginalText });
   }, [historyIndex, history, updateHistory, currentPage]);
 
+  const bringToFront = useCallback((objectId: string) => {
+    const currentState = history[historyIndex];
+    const newEditorObjects = JSON.parse(JSON.stringify(currentState.editorObjects));
+    const page = currentPage;
+    const pageObjects = newEditorObjects[page] || [];
+    
+    // Find the image object and get its current z-index
+    const imageObject = pageObjects.find(o => o.id === objectId && o.type === 'image');
+    if (!imageObject) return;
+    
+    // Find the highest z-index among all objects
+    const maxZIndex = Math.max(...pageObjects.map(o => o.type === 'image' ? o.zIndex || 0 : 0));
+    
+    // Update the image's z-index to be higher than all others
+    const updatedPageObjects = pageObjects.map(o =>
+        o.id === objectId ? { ...o, zIndex: maxZIndex + 1 } : o
+    );
+    
+    newEditorObjects[page] = updatedPageObjects;
+    updateHistory({ ...currentState, editorObjects: newEditorObjects });
+  }, [historyIndex, history, updateHistory, currentPage]);
+
+  const sendToBack = useCallback((objectId: string) => {
+    const currentState = history[historyIndex];
+    const newEditorObjects = JSON.parse(JSON.stringify(currentState.editorObjects));
+    const page = currentPage;
+    const pageObjects = newEditorObjects[page] || [];
+    
+    // Find the image object
+    const imageObject = pageObjects.find(o => o.id === objectId && o.type === 'image');
+    if (!imageObject) return;
+    
+    // Find the lowest z-index among all objects (including text with z-index 5)
+    const allObjectZIndices = [
+      ...pageObjects.filter(o => o.type === 'image').map(o => o.zIndex || 0),
+      5 // Text elements have z-index 5
+    ];
+    const minZIndex = Math.min(...allObjectZIndices);
+    
+    // Update the image's z-index to be lower than all others (including text)
+    const updatedPageObjects = pageObjects.map(o =>
+        o.id === objectId ? { ...o, zIndex: minZIndex - 1 } : o
+    );
+    
+    newEditorObjects[page] = updatedPageObjects;
+    updateHistory({ ...currentState, editorObjects: newEditorObjects });
+  }, [historyIndex, history, updateHistory, currentPage]);
 
   const undo = useCallback(() => {
     if (canUndo) {
@@ -474,6 +521,8 @@ const App: React.FC = () => {
                     onUpdateOriginalText={updateOriginalText}
                     onDeleteObject={deleteObject}
                     onResetOriginalTextPosition={resetOriginalTextPosition}
+                    onBringToFront={bringToFront}
+                    onSendToBack={sendToBack}
                     selectedObjectId={selectedObjectId}
                     onSelectObject={setSelectedObjectId}
                 />
